@@ -160,8 +160,7 @@ init_state()
 # =========================
 # Helpers
 # =========================
-def safe_rerun(interval=0.12):
-    """Throttle reruns to reduce flicker but keep confidence responsive."""
+def safe_rerun(interval):
     now = time.time()
     if now - st.session_state.last_rerun_ts >= interval:
         st.session_state.last_rerun_ts = now
@@ -173,12 +172,9 @@ def open_camera():
         if not cap.isOpened():
             st.error("Could not open webcam. Close Teams/Zoom and try again.")
             return False
-
-        # Reduce lag/flicker
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
         cap.set(cv2.CAP_PROP_FPS, 15)
-
         st.session_state.cap = cap
     return True
 
@@ -245,13 +241,11 @@ def tick_once():
     dt = 0.0 if st.session_state.last_tick is None else max(0.0, now - st.session_state.last_tick)
     st.session_state.last_tick = now
 
-    # Summary time
     if status == "Focused":
         st.session_state.focused_s += dt
     elif status == "Distracted":
         st.session_state.distracted_s += dt
 
-    # Temporal metrics (kept for explainability)
     if status == "Distracted":
         st.session_state.distracted_streak_s += dt
         st.session_state.focused_streak_s = max(0.0, st.session_state.focused_streak_s - dt)
@@ -266,7 +260,6 @@ def tick_once():
     st.session_state.status = status
     st.session_state.score = score
 
-    # PROMPTS: show straight away on distraction (unless snoozed)
     if (
         status == "Distracted"
         and (not st.session_state.prompt_active)
@@ -278,7 +271,6 @@ def tick_once():
         st.session_state.prompt_active = True
         st.session_state.prompt_last_shown_at = now
 
-    # Don't overwrite an active prompt
     if (not st.session_state.prompt_active) and (now >= st.session_state.snooze_until):
         st.session_state.prompt_text = "No prompt right now."
 
@@ -351,7 +343,6 @@ with tab_drive:
         unsafe_allow_html=True,
     )
 
-    # IMPORTANT: process End journey BEFORE rerun scheduling
     end_clicked = st.button("End journey")
     if end_clicked:
         st.session_state.monitoring = False
@@ -385,7 +376,6 @@ with tab_drive:
     if st.session_state.monitoring:
         frame_rgb = tick_once()
 
-        # Update header/indicator with latest values (same run)
         status_ph.markdown(f"**Status:** {st.session_state.status}")
         conf_ph.markdown(f"**Confidence:** {int(st.session_state.score * 100)}%")
         if st.session_state.prompt_active:
@@ -408,16 +398,15 @@ with tab_drive:
                 2,
             )
             video_box.image(disp, channels="RGB", use_container_width=True)
-        else:
-            video_box.caption("Camera preview hidden (enable in Setup).")
 
-        time.sleep(0.03)
-        safe_rerun(interval=0.12)
+        # KEY CHANGE: if preview is OFF, refresh slower to stop visible flicker
+        interval = 0.12 if st.session_state.show_video else 0.35
+        time.sleep(0.02)
+        safe_rerun(interval=interval)
+
     else:
         if st.session_state.last_frame_rgb is not None and st.session_state.show_video:
             video_box.image(st.session_state.last_frame_rgb, channels="RGB", use_container_width=True)
-        else:
-            video_box.caption("Camera not running.")
 
     st.markdown("</div>", unsafe_allow_html=True)
 
@@ -468,5 +457,4 @@ with tab_summary:
         reflection = "Sustained distraction was observed. Reviewing conditions and habits may be helpful."
 
     st.markdown(f'<div class="rb-muted">{reflection}</div>', unsafe_allow_html=True)
-
     st.markdown("</div>", unsafe_allow_html=True)
